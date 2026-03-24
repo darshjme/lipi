@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-logger"
+version = "0.1.0"
+description = "Structured JSON logging for LLM agents — correlation IDs, context binding, sampling, and redaction."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Darshankumar Joshi", email = "darshjme@gmail.com" }]
+requires-python = ">=3.10"
+dependencies = []  # zero external deps — pure stdlib
+keywords = ["logging", "llm", "agents", "structured-logging", "json"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: System :: Logging",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-cov"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
