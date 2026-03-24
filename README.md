@@ -1,184 +1,112 @@
+<div align="center">
+<img src="assets/hero.svg" width="100%"/>
+</div>
+
 # agent-logger
 
-**Structured JSON logging for LLM agents** — correlation IDs, context binding, probabilistic sampling, and sensitive field redaction. Zero external dependencies (pure Python stdlib).
+**Structured JSON logging with tracing for LLM agents. Zero external dependencies.**
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
----
-
-## Quick Install
-
-```bash
-pip install agent-logger
-```
+[![PyPI](https://img.shields.io/pypi/v/agent-logger?color=blue)](https://pypi.org/project/agent-logger/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://python.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Zero deps](https://img.shields.io/badge/dependencies-zero-brightgreen)](pyproject.toml)
 
 ---
 
 ## The Problem
 
-Standard Python logging is unstructured:
+Production LLM agents fail silently. Without structured json logging with tracing, you get undefined behaviour at scale — race conditions, lost state, cascading failures, and no way to debug what went wrong.
+
+`agent-logger` gives you a production-ready structured json logging with tracing primitive with a clean API, tested edge cases, and zero configuration.
+
+## Installation
+
+```bash
+pip install agent-logger
+```
+
+Or from source:
+
+```bash
+git clone https://github.com/darshjme/agent-logger.git
+cd agent-logger
+pip install -e .
+```
+
+## Quick Start
 
 ```python
-logging.info("Called LLM")  # 🤔 what model? how long? which request?
+from agent_logger import *  # see API reference below
+
+# See examples/ directory for complete working examples
 ```
-
-In production multi-agent systems you need:
-- JSON records ingestible by Datadog / Loki / CloudWatch
-- **Correlation IDs** to trace a request across agent boundaries
-- Automatic context fields (model, tokens, latency)
-- **Log sampling** to avoid drowning in high-volume debug noise
-- **Redaction** of API keys and secrets before they hit disk
-
----
-
-## 3-Agent Request Tracing Example
-
-```python
-from agent_logger import AgentLogger, CorrelationContext
-
-# --- Agent 1: Router ---
-router_log = AgentLogger("router")
-
-def handle_request(user_query: str):
-    # Generate and broadcast the correlation ID for this request
-    cid = CorrelationContext.generate()
-    with CorrelationContext.scope(cid):
-        router_log.info("request received", query=user_query[:50])
-        # hand off to Agent 2
-        result = call_retriever(user_query)
-        # hand off to Agent 3
-        answer = call_llm(result)
-        router_log.info("request complete", answer_len=len(answer))
-        return answer
-
-
-# --- Agent 2: Retriever ---
-retriever_log = AgentLogger("retriever")
-
-def call_retriever(query: str):
-    # correlation_id is already in thread-local — auto-injected
-    retriever_log.info("fetching docs", query=query[:50], k=5)
-    docs = ["doc1", "doc2"]  # simulate retrieval
-    retriever_log.info("docs fetched", count=len(docs))
-    return docs
-
-
-# --- Agent 3: LLM Caller ---
-llm_log = AgentLogger("llm-caller")
-
-def call_llm(docs):
-    llm_log.info("calling llm", model="gpt-4o", doc_count=len(docs))
-    answer = "42"  # simulate LLM response
-    llm_log.info("llm responded", tokens=128, latency_ms=210)
-    return answer
-
-
-handle_request("What is the meaning of life?")
-```
-
-**Output** (all three agents share the same `correlation_id`):
-
-```json
-{"timestamp":"2026-03-24T08:00:00Z","level":"INFO","name":"router","message":"request received","correlation_id":"f47ac10b-58cc-4372-a567-0e02b2c3d479","query":"What is the meaning of life?"}
-{"timestamp":"2026-03-24T08:00:00Z","level":"INFO","name":"retriever","message":"fetching docs","correlation_id":"f47ac10b-58cc-4372-a567-0e02b2c3d479","query":"What is the meaning of life?","k":5}
-{"timestamp":"2026-03-24T08:00:00Z","level":"INFO","name":"retriever","message":"docs fetched","correlation_id":"f47ac10b-58cc-4372-a567-0e02b2c3d479","count":2}
-{"timestamp":"2026-03-24T08:00:00Z","level":"INFO","name":"llm-caller","message":"calling llm","correlation_id":"f47ac10b-58cc-4372-a567-0e02b2c3d479","model":"gpt-4o","doc_count":2}
-{"timestamp":"2026-03-24T08:00:00Z","level":"INFO","name":"llm-caller","message":"llm responded","correlation_id":"f47ac10b-58cc-4372-a567-0e02b2c3d479","tokens":128,"latency_ms":210}
-{"timestamp":"2026-03-24T08:00:00Z","level":"INFO","name":"router","message":"request complete","correlation_id":"f47ac10b-58cc-4372-a567-0e02b2c3d479","answer_len":2}
-```
-
----
-
-## Components
-
-### `AgentLogger`
-
-```python
-from agent_logger import AgentLogger
-
-logger = AgentLogger(
-    name="my-agent",
-    level="INFO",          # DEBUG | INFO | WARNING | ERROR | CRITICAL
-    output="stdout",       # "stdout" | "stderr" | "/path/to/file.log"
-    json_format=True,      # False = plain text
-)
-
-logger.info("model called", model="gpt-4o", tokens=512, latency_ms=340)
-# {"timestamp":"...","level":"INFO","name":"my-agent","message":"model called",
-#  "correlation_id":null,"model":"gpt-4o","tokens":512,"latency_ms":340}
-```
-
-### `ContextLogger` — bound fields
-
-```python
-ctx = logger.with_context(agent="router", env="prod")
-ctx.info("started")          # agent + env injected automatically
-ctx2 = ctx.bind(request_id="r-001")  # immutable — returns new logger
-ctx2.info("processing")
-```
-
-### `CorrelationContext` — thread-local ID management
-
-```python
-from agent_logger import CorrelationContext
-
-cid = CorrelationContext.generate()    # generates UUID4
-CorrelationContext.set(cid)            # set for current thread
-print(CorrelationContext.get())        # read from anywhere in same thread
-
-# Context manager (auto-clears):
-with CorrelationContext.scope(cid):
-    ...  # all logs here include this cid
-```
-
-### `LogSampler` — probabilistic sampling
-
-```python
-from agent_logger import LogSampler
-
-sampler = LogSampler(rate=0.1)          # log only 10% of records
-sampled_logger = sampler.wrap(logger)   # SampledLogger
-sampled_logger.debug("high volume")     # ~10% chance of appearing
-```
-
-### `RedactingFilter` — auto-redact secrets
-
-```python
-from agent_logger import AgentLogger, RedactingFilter
-
-rf = RedactingFilter()   # default: api_key, token, password, secret, authorization
-# or: RedactingFilter(fields=["my_secret"])
-
-logger = AgentLogger("secure-agent", redacting_filter=rf)
-logger.info("auth call", api_key="sk-abc123", model="gpt-4")
-# {"api_key":"***REDACTED***","model":"gpt-4",...}
-```
-
----
 
 ## API Reference
 
-| Class | Key Methods |
-|-------|-------------|
-| `AgentLogger` | `info/debug/warning/error/critical(msg, **kw)`, `with_context(**kw)`, `set_correlation_id(id)`, `get_correlation_id()` |
-| `ContextLogger` | Same log methods + `bind(**kw) -> ContextLogger` |
-| `CorrelationContext` | `set(id)`, `get()`, `generate()`, `clear()`, `scope(id)` (context manager) |
-| `LogSampler` | `should_log() -> bool`, `wrap(logger) -> SampledLogger` |
-| `RedactingFilter` | `filter(record: dict) -> dict` |
+The main classes and functions are defined in `agent_logger/__init__.py`.
 
----
+Key exports: `Correlation IDs · request tracing · auto-redaction · log sampling`
 
-## Running Tests
+All classes follow a consistent interface:
+- Instantiate with sensible defaults
+- Compose with other arsenal libraries
+- Zero external dependencies required
 
-```bash
-pip install -e ".[dev]"
-python -m pytest tests/ -v
-# 40 tests, all pass
+See the source code and `tests/` directory for verified usage examples.
+
+## How It Works
+
+```mermaid
+flowchart LR
+    A[Agent Task] --> B[agent-logger]
+    B --> C{Decision}
+    C -->|success| D[✅ Result]
+    C -->|failure| E[⚠️ Handle]
+    E --> B
+
+    style B fill:#161b22,stroke:#cc9933,stroke-width:2,color:#cc9933
+    style D fill:#1a3320,stroke:#238636,color:#3fb950
+    style E fill:#3d1a1a,stroke:#f85149,color:#f85149
 ```
 
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant AgentLogger as agent-logger
+    participant Output
+
+    Agent->>AgentLogger: initialize()
+    AgentLogger-->>Agent: ready
+
+    loop Agent Run
+        Agent->>AgentLogger: process(input)
+        AgentLogger-->>Agent: result
+    end
+
+    Agent->>Output: deliver(result)
+```
+
+## Philosophy
+
+*Likhitam cha* — what is written, endures. agent-logger writes every agent action with precision.
+
 ---
 
-## License
+## Part of the Arsenal
 
-MIT © Darshankumar Joshi
+`agent-logger` is one of six production libraries for LLM agents:
+
+| Library | Purpose |
+|---------|---------|
+| [herald](https://github.com/darshjme/herald) | Semantic task routing |
+| [engram](https://github.com/darshjme/engram) | Agent memory |
+| [sentinel](https://github.com/darshjme/sentinel) | ReAct loop guards |
+| [verdict](https://github.com/darshjme/verdict) | Agent evaluation |
+| [agent-guardrails](https://github.com/darshjme/agent-guardrails) | Output validation |
+| [agent-observability](https://github.com/darshjme/agent-observability) | Tracing & metrics |
+
+→ [arsenal](https://github.com/darshjme/arsenal) — the complete stack
+
+---
+
+*Built by [Darshankumar Joshi](https://github.com/darshjme), Gujarat, India.*
