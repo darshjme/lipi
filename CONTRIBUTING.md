@@ -13,7 +13,9 @@ pip install -e ".[dev]"
 ## Running Tests
 
 ```bash
-python -m pytest tests/ -v
+PYTHONPATH=src python -m pytest tests/ -v
+
+> **Note:** `PYTHONPATH=src` is required for libraries using a `src/` layout.
 ```
 
 ## Code Style
@@ -26,7 +28,9 @@ python -m pytest tests/ -v
 
 1. Fork the repo and create a feature branch (`git checkout -b feature/my-feature`).
 2. Write tests for your changes.
-3. Ensure all tests pass (`python -m pytest tests/ -v`).
+3. Ensure all tests pass (`PYTHONPATH=src python -m pytest tests/ -v`).
+
+> **Note:** `PYTHONPATH=src` is required for libraries using a `src/` layout.
 4. Open a pull request with a clear description of the change and why.
 
 ## Reporting Issues
